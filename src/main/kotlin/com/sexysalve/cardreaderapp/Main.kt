@@ -250,26 +250,25 @@ fun App(cardReaderBackend: CardReaderBackend) {
                                     coroutineScope.launch(Dispatchers.IO) {
                                         var resultMessage = "Не удалось прочитать EF.SUME." // Default error
                                         try {
-                                            // Команды APDU (можно вынести в константы или helper object)
-                                            val selectUsimAdfCmd = HexFormat.of().parseHex("00A4040008A0000000871002FF")
-                                            val selectEfSumeCmd = HexFormat.of().parseHex("00A4020C026F18")
-                                            val readBinaryEfSumeCmd = HexFormat.of().parseHex("00B0000000")
+                                            // Команды APDU для структуры MF/DF.TELECOM/EF.SUME
+                                            val selectDfTelecomCmd = HexFormat.of().parseHex("00A40000027F10")
+                                            val selectEfSumeCmd = HexFormat.of().parseHex("00A40000026F54")
+                                            val readBinaryEfSumeCmd = HexFormat.of().parseHex("00B00000" + String.format("%02X", 20)) // 20 байт для мока
 
-                                            val responseUsimAdf = cardReaderBackend.sendApdu(selectUsimAdfCmd)
-                                            if (responseUsimAdf == null || !(responseUsimAdf.last() == 0x00.toByte() && responseUsimAdf[responseUsimAdf.size - 2] == 0x90.toByte())) {
-                                                throw Exception("Ошибка выбора USIM ADF: ${formatApduResponseForDisplay(responseUsimAdf)}")
+                                            val responseDfTelecom = cardReaderBackend.sendApdu(selectDfTelecomCmd)
+                                            if (responseDfTelecom == null || !(responseDfTelecom.last() == 0x00.toByte() && responseDfTelecom[responseDfTelecom.size - 2] == 0x90.toByte())) {
+                                                throw Exception("Ошибка выбора DF.TELECOM: ${formatApduResponseForDisplay(responseDfTelecom)}")
                                             }
 
                                             val responseEfSumeSelect = cardReaderBackend.sendApdu(selectEfSumeCmd)
                                             if (responseEfSumeSelect == null || !(responseEfSumeSelect.last() == 0x00.toByte() && responseEfSumeSelect[responseEfSumeSelect.size - 2] == 0x90.toByte())) {
                                                 // Допускаем 62xx или 61xx как "успех с предупреждением/FCP" для мока
                                                 val sw1 = responseEfSumeSelect?.getOrNull(responseEfSumeSelect.size - 2)
-                                                if (sw1 != 0x62.toByte() && sw1 != 0x61.toByte() && sw1 != 0x90.toByte() ){ // 90 добавлено для полноты
+                                                if (sw1 != 0x62.toByte() && sw1 != 0x61.toByte() && sw1 != 0x90.toByte() ){
                                                     throw Exception("Ошибка выбора EF.SUME: ${formatApduResponseForDisplay(responseEfSumeSelect)}")
                                                 }
                                                 println("Select EF.SUME response: ${formatApduResponseForDisplay(responseEfSumeSelect)}")
                                             }
-
 
                                             val responseReadBinary = cardReaderBackend.sendApdu(readBinaryEfSumeCmd)
                                             if (responseReadBinary == null || !(responseReadBinary.last() == 0x00.toByte() && responseReadBinary[responseReadBinary.size - 2] == 0x90.toByte())) {

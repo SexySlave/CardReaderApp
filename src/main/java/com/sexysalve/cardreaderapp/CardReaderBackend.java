@@ -17,6 +17,7 @@ class MockCard extends Card {
 
     // Имитация файловой системы карты
     private boolean usimAdfSelected = false;
+    private boolean dfTelecomSelected = false;
     private boolean efSumeSelected = false;
 
     // Примерное содержимое EF.SUME (Subscriber Usage Measurement Entry)
@@ -34,10 +35,10 @@ class MockCard extends Card {
     };
 
     // APDU команды, которые мы будем "понимать"
-    // SELECT USIM ADF (A0000000871002...)
-    private static final byte[] SELECT_USIM_ADF = HexFormat.of().parseHex("00A4040008A0000000871002FF"); // FF - Le, ожидаем ответ
-    // SELECT EF.SUME (файл ID 6F18 под USIM ADF)
-    private static final byte[] SELECT_EF_SUME = HexFormat.of().parseHex("00A4020C026F18"); // 6F18 - это пример ID, он может быть другим
+    // SELECT DF.TELECOM (7F10)
+    private static final byte[] SELECT_DF_TELECOM = HexFormat.of().parseHex("00A40000027F10");
+    // SELECT EF.SUME (6F54 под DF.TELECOM)
+    private static final byte[] SELECT_EF_SUME = HexFormat.of().parseHex("00A40000026F54");
     // READ BINARY
     // Команда будет вида 00 B0 <offset_hi> <offset_lo> <Le>
 
@@ -100,7 +101,7 @@ class MockCard extends Card {
     public void disconnect(boolean reset) throws CardException {
         System.out.println("MOCK: Card in " + terminalName + " disconnected (reset=" + reset + ")");
         this.connected = false;
-        this.usimAdfSelected = false;
+        this.dfTelecomSelected = false;
         this.efSumeSelected = false;
     }
 
@@ -122,61 +123,37 @@ class MockCard extends Card {
         System.out.println("MOCK CardChannel: Processing APDU: " + HexFormat.of().formatHex(apdu));
 
         if (cla == 0x00 && ins == (byte)0xA4) { // SELECT command
-            if (p1 == 0x04 && p2 == 0x00) { // Select by DF Name (AID)
-                // Сравниваем только значащую часть AID, игнорируя Le
-                byte[] aidToSelect = Arrays.copyOfRange(SELECT_USIM_ADF, 5, 5 + SELECT_USIM_ADF[4]);
-                if (Arrays.equals(data, aidToSelect)) {
-                    usimAdfSelected = true;
-                    efSumeSelected = false; // Сбрасываем выбор EF при выборе ADF
-                    System.out.println("MOCK: USIM ADF Selected.");
-                    // Успешный ответ для SELECT (FCI может быть более сложным)
-                    // Для простоты, просто 9000
-                    return new ResponseAPDU(new byte[]{(byte)0x90, (byte)0x00});
-                }
-            } else if (usimAdfSelected && p1 == 0x02 && p2 == 0x0C) { // Select EF by File ID (под текущим DF)
-                // Сравниваем только ID файла
-                byte[] fileIdToSelect = Arrays.copyOfRange(SELECT_EF_SUME, 5, 5 + SELECT_EF_SUME[4]);
-                if (Arrays.equals(data, fileIdToSelect)) {
-                    efSumeSelected = true;
-                    System.out.println("MOCK: EF.SUME Selected.");
-                    // Ответ для SELECT EF обычно содержит информацию о файле (FCP)
-                    // Для мока, просто 9000 или можно вернуть мок-FCP
-                    // Пример мок-FCP с размером файла:
-                    // 62 0F (FCP template)
-                    //    82 02 78 21 (File descriptor: EF, Transparent, size 33)
-                    //    83 02 6F 18 (File ID)
-                    //    8A 01 05    (Life Cycle Status: Activated)
-                    // 90 00
-                    byte[] mockFcpSume = HexFormat.of().parseHex("620F8202001483026F188A01059000"); // 0014 hex = 20 dec (размер EF_SUME_MOCK_DATA)
-                    // Заменяем байты размера файла на актуальный
-                    mockFcpSume[4] = (byte) (EF_SUME_MOCK_DATA.length >> 8); // Старший байт размера
-                    mockFcpSume[5] = (byte) (EF_SUME_MOCK_DATA.length & 0xFF); // Младший байт размера
-
-                    return new ResponseAPDU(mockFcpSume);
-                }
+            if (p1 == 0x00 && p2 == 0x00 && nc == 2 && Arrays.equals(data, Arrays.copyOfRange(SELECT_DF_TELECOM, 5, 7))) {
+                dfTelecomSelected = true;
+                efSumeSelected = false;
+                usimAdfSelected = false;
+                System.out.println("MOCK: DF.TELECOM Selected.");
+                return new ResponseAPDU(new byte[]{(byte)0x90, (byte)0x00});
+            } else if (dfTelecomSelected && p1 == 0x00 && p2 == 0x00 && nc == 2 && Arrays.equals(data, Arrays.copyOfRange(SELECT_EF_SUME, 5, 7))) {
+                efSumeSelected = true;
+                System.out.println("MOCK: EF.SUME Selected under DF.TELECOM.");
+                byte[] mockFcpSume = HexFormat.of().parseHex("620F8202001483026F548A01059000");
+                mockFcpSume[4] = (byte) (EF_SUME_MOCK_DATA.length >> 8);
+                mockFcpSume[5] = (byte) (EF_SUME_MOCK_DATA.length & 0xFF);
+                return new ResponseAPDU(mockFcpSume);
             }
-        } else if (usimAdfSelected && efSumeSelected && cla == 0x00 && ins == (byte)0xB0) { // READ BINARY
+        } else if (dfTelecomSelected && efSumeSelected && cla == 0x00 && ins == (byte)0xB0) { // READ BINARY
             int offset = (p1 & 0xFF) << 8 | (p2 & 0xFF);
-            int bytesToRead = (ne == 0) ? 256 : ne; // Если Le=00, значит 256
-            if (ne == 0 && EF_SUME_MOCK_DATA.length - offset < 256) { // Если Le=00, но осталось меньше 256
+            int bytesToRead = (ne == 0) ? 256 : ne;
+            if (ne == 0 && EF_SUME_MOCK_DATA.length - offset < 256) {
                 bytesToRead = EF_SUME_MOCK_DATA.length - offset;
             }
-
-
             System.out.println("MOCK: READ BINARY for EF.SUME. Offset: " + offset + ", Length: " + bytesToRead);
-
             if (offset >= EF_SUME_MOCK_DATA.length) {
                 System.err.println("MOCK: READ BINARY offset out of bounds.");
-                return new ResponseAPDU(new byte[]{(byte)0x6B, (byte)0x00}); // Wrong P1/P2 (Offset out of range)
+                return new ResponseAPDU(new byte[]{(byte)0x6B, (byte)0x00});
             }
-
             int actualLength = Math.min(bytesToRead, EF_SUME_MOCK_DATA.length - offset);
             byte[] responseData = Arrays.copyOfRange(EF_SUME_MOCK_DATA, offset, offset + actualLength);
             byte[] fullResponse = new byte[responseData.length + 2];
             System.arraycopy(responseData, 0, fullResponse, 0, responseData.length);
             fullResponse[responseData.length] = (byte)0x90;
             fullResponse[responseData.length + 1] = (byte)0x00;
-
             System.out.println("MOCK: Returning " + actualLength + " bytes from EF.SUME.");
             return new ResponseAPDU(fullResponse);
         }
