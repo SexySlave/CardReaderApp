@@ -93,13 +93,16 @@ fun App(cardReaderBackend: CardReaderBackend) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Управление ридером", style = MaterialTheme.typography.h6)
 
+                        // Кнопка поиска ридеров
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = {
+                                    // Запуск поиска ридеров
                                     updateState { copy(isLoadingTerminals = true, terminals = emptyList(), selectedTerminal = null, cardStatusMessage = "Поиск ридеров...") }
                                     coroutineScope.launch(Dispatchers.IO) {
                                         val names = cardReaderBackend.listTerminalNames()
                                         withContext(Dispatchers.Main) {
+                                            // Обновление состояния после получения списка ридеров
                                             updateState {
                                                 copy(
                                                     terminals = names,
