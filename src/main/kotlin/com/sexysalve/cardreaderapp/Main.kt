@@ -307,8 +307,8 @@ fun App(cardReaderBackend: CardReaderBackend) {
 }
 
 fun main() = application {
-    val cardReaderBackend = remember { CardReaderBackend() } // Один экземпляр на все приложение
-    Window(onCloseRequest = ::exitApplication, title = "Card Reader App - Improved UI") {
+    val cardReaderBackend = remember { CardReaderBackend() }
+    Window(onCloseRequest = ::exitApplication, title = "Card Reader App") {
         App(cardReaderBackend)
     }
 }
